@@ -19,8 +19,8 @@ Two frames arrive per cycle, and both are decoded:
 | DYNAMIC | `0x02` | a `0x1620` write | voltages, current, power, SOC/SOH, temps, cells, cycles |
 | SETTINGS | `0x01` | a `0x161E` write | OVP/UVP thresholds, current limits, capacity, switches |
 
-See `../jk-bms-esp32s3-firmware-plan.md` for the full plan and
-`../jk-bms-build-checklist.md` for the phase-by-phase checklist. The vendor
+See [`jk-bms-esp32s3-firmware-plan.md`](jk-bms-esp32s3-firmware-plan.md) for the full plan and
+[`jk-bms-build-checklist.md`](jk-bms-build-checklist.md) for the phase-by-phase checklist. The vendor
 datasheet is the [JK-PB2A16S20P BMS Specification V1.0](https://www.gobelpower.com/download/JKBMS-JK-PB2A16S20P-Specication-EN-V1.0.pdf).
 
 ## Configure
@@ -47,8 +47,8 @@ which brokers reject with a misleading "not authorized". They are deliberately
 
 ### Keeping credentials out of the tree: `overlay/`
 
-Put your credentials in `../overlay/sdkconfig.secrets` (the `overlay/` folder
-at the repo root is gitignored):
+Put your credentials in `overlay/sdkconfig.secrets` (the `overlay/` folder
+is gitignored):
 
 ```
 CONFIG_JK_WIFI_SSID="my-network"

@@ -184,7 +184,7 @@ get_idf
 ```
 
 ```bash
-cd jk-bms-monitor && idf.py -p $PORT flash monitor
+idf.py -p $PORT flash monitor     # from the repo root
 ```
 
 With no BMS attached this is the expected, *correct* output: Wi-Fi fails to associate (the
@@ -256,11 +256,11 @@ top level is ESP-IDF's own thousand-option config, not yours.
 ### Route 2 — edit `sdkconfig` directly (no TUI)
 
 Better when you just want one value changed, and it's scriptable. `sdkconfig` is a plain text
-file: `../overlay/sdkconfig` when you keep credentials in the overlay (see the README), otherwise
+file: `overlay/sdkconfig` when you keep credentials in the overlay (see the README), otherwise
 `sdkconfig` in the project root. For example, set the cell count:
 
 ```bash
-sed -i '' 's/^CONFIG_JK_CELL_COUNT=.*/CONFIG_JK_CELL_COUNT=16/' ../overlay/sdkconfig
+sed -i '' 's/^CONFIG_JK_CELL_COUNT=.*/CONFIG_JK_CELL_COUNT=16/' overlay/sdkconfig
 ```
 
 The next `idf.py build` picks it up, and the edit preserves everything else in the file
@@ -517,7 +517,7 @@ frame with a trailing Modbus CRC16; the widely-deployed JK02 variant uses a 300-
 ending in an additive sum byte. `jk55.c` tries both and names the winner in the log. Record it.
 
 The 10 s bus report names which of these you are in — see the verdict table in
-`jk-bms-monitor/README.md`, or `jk_bus_advice()` for the one-line fix suggestion:
+`README.md`, or `jk_bus_advice()` for the one-line fix suggestion:
 
 | What you see | Means |
 |---|---|

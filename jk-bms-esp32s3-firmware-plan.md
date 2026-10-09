@@ -139,7 +139,7 @@ the inverter is *not* using.
 >
 > They are left in place because "Protocol decision" and "Findings" below only make sense
 > against what they replaced. **Do not implement from them.** For the protocol as actually
-> built, read `jk-bms-monitor/README.md` and the header comments in `jk55.h` / `jk_req.h`.
+> built, read `README.md` and the header comments in `jk55.h` / `jk_req.h`.
 
 ### 2.1 Modbus RTU — superseded, never validated
 
