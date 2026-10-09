@@ -1,0 +1,7 @@
+# Personal data: credentials, the generated sdkconfig, the real Home Assistant
+# notify target, device identifiers and vendor documents not ours to
+# redistribute. See overlay/README.md (which is itself not published).
+/overlay/
+
+# macOS Finder metadata
+.DS_Store

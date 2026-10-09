@@ -1,0 +1,19 @@
+# Target
+CONFIG_IDF_TARGET="esp32s3"
+
+# App won't fit the default 1MB factory partition once Wi-Fi + MQTT are in.
+#
+# Measured 2026-08-31 with `esptool.py -p <port> flash_id`: this module has
+# 16MB flash and 8MB embedded PSRAM (ESP32-S3 QFN56 rev v0.2, quad SPI, 3.3V).
+# The earlier 4MB setting was a safe guess; it is no longer a guess, and it
+# mattered: Phase 5 wants OTA with rollback, which needs two app partitions.
+# Declaring 4MB would have capped the partition table before that was possible.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+
+# PSRAM is present but deliberately not enabled: the app uses well under 1MB of
+# RAM and enabling it costs boot time and adds cache-coherency footguns for no
+# benefit here. Revisit only if a web dashboard (Phase 6) needs buffers.
+
+# Reasonable log verbosity for bring-up
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y

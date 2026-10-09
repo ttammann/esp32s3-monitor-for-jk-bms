@@ -1,0 +1,335 @@
+# Home Assistant dashboard for jk-bms-monitor
+#
+# Paste into a new dashboard: Settings -> Dashboards -> + Add Dashboard,
+# then open it, pencil icon -> three dots -> "Raw configuration editor",
+# and replace the contents with this file.
+#
+# THREE THINGS TO KNOW BEFORE THIS WORKS:
+#
+# 1. Entity IDs below are DERIVED, not observed. They are what Home Assistant
+#    will generate from the discovery payloads (device "JK BMS" + each entity
+#    name, slugified). If HA finds a collision it appends _2, and the IDs will
+#    differ. Verify against Settings -> Devices & Services -> MQTT -> JK BMS
+#    once the board has actually connected.
+#
+# 2. The 16 per-cell sensors are published with "enabled_by_default: false",
+#    so the cell graph will be empty until you enable them: device page ->
+#    "+16 entities not shown" -> select all -> Enable.
+#
+# 3. The "Pack configuration" card reads the retained settings topic, which is
+#    only published once a SETTINGS frame has arrived from the BMS over RS485.
+#    With the RS485 lead disconnected those entities exist but read Unknown.
+#
+# Adapted from the Gobel Battery dashboard layout. Two deliberate differences:
+# that integration decodes ~20 individual alarm binary sensors, whereas this
+# firmware publishes one raw alarm bitfield (no bit-to-meaning map has ever
+# been documented for this unit), so the warning card is conditional on the
+# bitfield being non-zero rather than a per-alarm filter list. And this pack
+# reports two temperature sensors plus MOSFET, not four.
+
+views:
+  - title: Battery
+    path: battery
+    type: sidebar
+    cards:
+      # ---------------- main column ----------------
+      - type: glance
+        show_name: true
+        show_icon: true
+        show_state: true
+        columns: 4
+        entities:
+          - entity: sensor.jk_bms_state_of_charge
+            name: SOC
+          - entity: sensor.jk_bms_pack_voltage
+            name: Voltage
+          - entity: sensor.jk_bms_current
+            name: Current
+          - entity: sensor.jk_bms_power
+            name: Power
+
+      - type: glance
+        title: Pack overview
+        columns: 4
+        entities:
+          - entity: sensor.jk_bms_state_of_health
+            name: SOH
+          - entity: sensor.jk_bms_cycle_count
+            name: Cycles
+          - entity: sensor.jk_bms_balance_current
+            name: Balance
+          - entity: sensor.jk_bms_cell_delta
+            name: Cell delta
+          - entity: sensor.jk_bms_mosfet_temp
+            name: MOSFET
+          - entity: sensor.jk_bms_temperature_1
+            name: Temp 1
+          - entity: sensor.jk_bms_temperature_2
+            name: Temp 2
+          - entity: sensor.jk_bms_worst_wire_resistance
+            name: Worst wire
+
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+          - type: entities
+            title: Capacity
+            entities:
+              - entity: sensor.jk_bms_remaining
+                name: Remaining
+              - entity: sensor.jk_bms_full_capacity
+                name: Full capacity
+              - entity: sensor.jk_bms_total_cycled
+                name: Total cycled
+              - entity: sensor.jk_bms_bms_runtime
+                name: BMS runtime
+
+          - type: entities
+            title: MOSFETs & balancing
+            state_color: true
+            entities:
+              - entity: binary_sensor.jk_bms_charge_mosfet
+                name: Charge MOSFET
+              - entity: binary_sensor.jk_bms_discharge_mosfet
+                name: Discharge MOSFET
+              - entity: binary_sensor.jk_bms_balancing
+                name: Balancing now
+              - entity: sensor.jk_bms_cell_min_index
+                name: Weakest cell
+              - entity: sensor.jk_bms_cell_max_index
+                name: Highest cell
+
+      # fit_y_data rather than a fixed 3.0-3.7 axis: cell divergence on a
+      # healthy LiFePO4 pack is a few mV, which is invisible on a full-range
+      # axis. Set min_y_axis/max_y_axis instead if you prefer absolute scale.
+      - type: history-graph
+        title: Cell voltages
+        hours_to_show: 48
+        fit_y_data: true
+        entities:
+          - entity: sensor.jk_bms_cell_01
+            name: Cell 01
+          - entity: sensor.jk_bms_cell_02
+            name: Cell 02
+          - entity: sensor.jk_bms_cell_03
+            name: Cell 03
+          - entity: sensor.jk_bms_cell_04
+            name: Cell 04
+          - entity: sensor.jk_bms_cell_05
+            name: Cell 05
+          - entity: sensor.jk_bms_cell_06
+            name: Cell 06
+          - entity: sensor.jk_bms_cell_07
+            name: Cell 07
+          - entity: sensor.jk_bms_cell_08
+            name: Cell 08
+          - entity: sensor.jk_bms_cell_09
+            name: Cell 09
+          - entity: sensor.jk_bms_cell_10
+            name: Cell 10
+          - entity: sensor.jk_bms_cell_11
+            name: Cell 11
+          - entity: sensor.jk_bms_cell_12
+            name: Cell 12
+          - entity: sensor.jk_bms_cell_13
+            name: Cell 13
+          - entity: sensor.jk_bms_cell_14
+            name: Cell 14
+          - entity: sensor.jk_bms_cell_15
+            name: Cell 15
+          - entity: sensor.jk_bms_cell_16
+            name: Cell 16
+
+      - type: history-graph
+        title: Temperatures
+        hours_to_show: 48
+        entities:
+          - entity: sensor.jk_bms_mosfet_temp
+            name: MOSFET
+          - entity: sensor.jk_bms_temperature_1
+            name: Temp 1
+          - entity: sensor.jk_bms_temperature_2
+            name: Temp 2
+
+      - type: history-graph
+        title: Pack voltage & current
+        hours_to_show: 48
+        entities:
+          - entity: sensor.jk_bms_pack_voltage
+            name: Pack voltage
+          - entity: sensor.jk_bms_current
+            name: Current
+
+      # ---------------- sidebar ----------------
+      # Only appears when the BMS reports a non-zero alarm bitfield. The extra
+      # state_not conditions stop it firing on unavailable/unknown, which is
+      # the normal state whenever the RS485 link is down.
+      - type: conditional
+        view_layout:
+          position: sidebar
+        conditions:
+          - condition: state
+            entity: sensor.jk_bms_alarm_bits
+            state_not: '0'
+          - condition: state
+            entity: sensor.jk_bms_alarm_bits
+            state_not: unavailable
+          - condition: state
+            entity: sensor.jk_bms_alarm_bits
+            state_not: unknown
+        card:
+          type: entities
+          title: ⚠️ BMS alarm active
+          state_color: true
+          entities:
+            - entity: sensor.jk_bms_alarm_bits
+              name: Alarm bitfield
+            - entity: sensor.jk_bms_cell_min
+              name: Lowest cell
+            - entity: sensor.jk_bms_cell_max
+              name: Highest cell
+            - entity: sensor.jk_bms_cell_min_index
+              name: Weakest cell number
+            - entity: sensor.jk_bms_mosfet_temp
+              name: MOSFET temp
+
+      - type: conditional
+        view_layout:
+          position: sidebar
+        conditions:
+          - condition: state
+            entity: binary_sensor.jk_bms_bms_comms
+            state: 'off'
+        card:
+          type: markdown
+          content: >-
+            ### 🔌 BMS not responding
+
+            No DYNAMIC frame for 25 s. The board is online and talking to MQTT,
+            but nothing is answering on RS485. Check the lead, the DIP switches
+            (must be `0000`) and that you are on the RS485-P port.
+
+      - type: entities
+        view_layout:
+          position: sidebar
+        title: System overview
+        state_color: true
+        entities:
+          - entity: sensor.jk_bms_pack_voltage
+            name: Pack voltage
+          - entity: sensor.jk_bms_current
+            name: Current
+          - entity: sensor.jk_bms_power
+            name: Power
+          - entity: sensor.jk_bms_state_of_charge
+            name: SOC
+          - entity: sensor.jk_bms_state_of_health
+            name: SOH
+          - type: divider
+          - entity: sensor.jk_bms_cell_max
+            name: Cell max
+          - entity: sensor.jk_bms_cell_min
+            name: Cell min
+          - entity: sensor.jk_bms_cell_average
+            name: Cell average
+          - entity: sensor.jk_bms_cell_delta
+            name: Cell delta
+
+      - type: entities
+        view_layout:
+          position: sidebar
+        title: Pack configuration
+        state_color: true
+        entities:
+          - entity: sensor.jk_bms_cells_configured
+            name: Cells configured
+          - entity: sensor.jk_bms_design_capacity
+            name: Design capacity
+          - type: divider
+          - entity: sensor.jk_bms_cell_ovp
+            name: Cell OVP
+          - entity: sensor.jk_bms_cell_uvp
+            name: Cell UVP
+          - entity: sensor.jk_bms_float_voltage
+            name: Float voltage
+          - entity: sensor.jk_bms_balance_trigger
+            name: Balance trigger
+          - type: divider
+          - entity: sensor.jk_bms_charge_limit
+            name: Charge limit
+          - entity: sensor.jk_bms_discharge_limit
+            name: Discharge limit
+          - entity: sensor.jk_bms_charge_over_temp
+            name: Charge over-temp
+          - entity: sensor.jk_bms_mosfet_over_temp
+            name: MOSFET over-temp
+          - type: divider
+          - entity: binary_sensor.jk_bms_charge_enabled
+            name: Charge enabled
+          - entity: binary_sensor.jk_bms_discharge_enabled
+            name: Discharge enabled
+          - entity: binary_sensor.jk_bms_balancer_enabled
+            name: Balancer enabled
+
+  - title: Diagnostics
+    path: diagnostics
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Link health
+          - type: entities
+            state_color: true
+            entities:
+              - entity: binary_sensor.jk_bms_bms_comms
+                name: BMS comms
+              - entity: sensor.jk_bms_frames_decoded
+                name: Frames decoded
+              - entity: sensor.jk_bms_wifi_rssi
+                name: WiFi RSSI
+              - entity: sensor.jk_bms_uptime
+                name: Monitor uptime
+              - entity: sensor.jk_bms_bms_runtime
+                name: BMS runtime
+          # Frames should climb by ~1 every 6.4 s. A flat line with the board
+          # still online means the RS485 side has stopped, not the network.
+          - type: history-graph
+            title: Frame count & signal
+            hours_to_show: 24
+            entities:
+              - entity: sensor.jk_bms_frames_decoded
+                name: Frames
+              - entity: sensor.jk_bms_wifi_rssi
+                name: RSSI
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Cell health
+          # The single number that rises when a crimp or busbar is degrading.
+          - type: entities
+            entities:
+              - entity: sensor.jk_bms_worst_wire_resistance
+                name: Worst wire resistance
+              - entity: sensor.jk_bms_cell_delta
+                name: Cell delta
+              - entity: sensor.jk_bms_cell_min_index
+                name: Weakest cell number
+              - entity: sensor.jk_bms_cell_max_index
+                name: Highest cell number
+              - entity: sensor.jk_bms_balance_current
+                name: Balance current
+              - entity: sensor.jk_bms_alarm_bits
+                name: Alarm bitfield
+          - type: history-graph
+            title: Cell spread over time
+            hours_to_show: 168
+            fit_y_data: true
+            entities:
+              - entity: sensor.jk_bms_cell_delta
+                name: Delta
+              - entity: sensor.jk_bms_worst_wire_resistance
+                name: Worst wire

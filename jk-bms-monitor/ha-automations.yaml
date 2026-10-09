@@ -1,0 +1,272 @@
+# JK BMS — SOC threshold alerts to iPhone
+#
+# INSTALL: Settings -> Automations & Scenes -> + Create Automation ->
+#          Create new automation -> ⋮ (top right) -> Edit in YAML ->
+#          replace everything with this file -> Save.
+#
+# NOTIFY TARGET: replace every notify.mobile_app_YOUR_PHONE below with your
+# phone's service, listed under Developer Tools -> Actions (search "notify.").
+#
+# That name is derived from the phone's own name (iOS Settings -> General ->
+# About). Rename the phone and the service name changes with it, at which
+# point all six alerts below quietly go nowhere — HA does not error on an
+# unknown notify target. Worth re-checking after any iOS restore.
+#
+# ONE THING TO VERIFY:
+#
+#    Critical alerts are an iOS-level permission, granted to the Home
+#    Assistant app rather than configured here. It is normally granted when
+#    you allow notifications during onboarding; if the 20% alert does not
+#    bypass silent mode, look for a "Critical Alerts" toggle under
+#    iOS Settings -> Notifications -> Home Assistant.
+#
+#    Do not take this on trust. Test it deliberately — put the phone on
+#    silent, enable a Focus, and fire the payload from the 20% branch below
+#    via Developer Tools -> Actions. Finding out at 20% SOC is too late.
+#
+# Entity IDs confirmed live 2026-08-31: the board is publishing and the
+# dashboard renders sensor.jk_bms_state_of_charge, _pack_voltage, _current and
+# _remaining correctly.
+#
+# ALERT LADDER
+#   80% rising    passive          — recovered; lands quietly, no sound or screen
+#   60% falling   active           — informational
+#   40% falling   time-sensitive   — breaks through a Focus, does not bypass silent
+#   20% falling   critical         — bypasses silent switch and Do Not Disturb, forces volume
+#   comms lost    time-sensitive   — monitor alive, battery silent (RS485 fault)
+#   monitor lost  time-sensitive   — ESP32 itself gone (power / Wi-Fi / broker)
+#
+# The last two matter more than they look: when either fires, every SOC alert
+# above has already gone silent. An alerting chain that fails quietly is worse
+# than no alerting chain.
+
+alias: JK BMS - SOC threshold alerts
+description: >-
+  Escalating iPhone alerts as the battery discharges past 60%, 40% and 20%,
+  a quiet all-clear when it recovers past 80%, and two health alerts for
+  losing sight of the battery at all. Each threshold re-arms itself once SOC
+  moves back across it, so there is no repeat spam.
+mode: queued
+max: 3
+
+triggers:
+  # The BMS reports SOC as a whole number, so `below: 61` is what fires the
+  # instant it reads 60. Using `below: 60` would delay each alert until 59.
+  #
+  # `for:` requires the level to hold rather than trusting a single sample.
+  # State arrives about every 6.4 s, so two minutes is roughly 19 consecutive
+  # readings — enough that one glitchy frame cannot page you.
+  - trigger: numeric_state
+    entity_id: sensor.jk_bms_state_of_charge
+    below: 61
+    for: "00:02:00"
+    id: soc_60
+
+  - trigger: numeric_state
+    entity_id: sensor.jk_bms_state_of_charge
+    below: 41
+    for: "00:02:00"
+    id: soc_40
+
+  # Shorter hold at the critical threshold — at 20% the cost of a minute's
+  # delay outweighs the risk of a spurious alert.
+  - trigger: numeric_state
+    entity_id: sensor.jk_bms_state_of_charge
+    below: 21
+    for: "00:01:00"
+    id: soc_20
+
+  # Recovery, the only upward trigger here. `above: 79` fires the moment it
+  # reads 80, mirroring the `below: N+1` convention above. Five minutes rather
+  # than two: charge current makes SOC jitter across a boundary more than
+  # discharge does, and nobody needs the good news urgently.
+  - trigger: numeric_state
+    entity_id: sensor.jk_bms_state_of_charge
+    above: 79
+    for: "00:05:00"
+    id: soc_80
+
+  # Losing sight of the battery matters more than any single SOC threshold,
+  # because every alert above goes silent at the same moment.
+  #
+  # Two distinct failures, deliberately separated -- they need opposite fixes:
+  #   off         monitor is alive and talking to MQTT, but no DYNAMIC frame
+  #               has arrived for 25 s. An RS485 problem.
+  #   unavailable the monitor itself is gone (LWT fired). Power or Wi-Fi.
+  #
+  # Five minutes so a reflash or a reboot does not page you; real staleness is
+  # declared at 25 s, so anything lasting five minutes is not a blip.
+  - trigger: state
+    entity_id: binary_sensor.jk_bms_bms_comms
+    to: "off"
+    for: "00:05:00"
+    id: comms_lost
+
+  - trigger: state
+    entity_id: binary_sensor.jk_bms_bms_comms
+    to: "unavailable"
+    for: "00:05:00"
+    id: monitor_lost
+
+conditions:
+  # The SOC guard must NOT block the comms alerts. When bms_status goes
+  # offline every state entity -- including SOC -- becomes unavailable, so a
+  # bare template condition here would silence the one alert that fires
+  # precisely then. Let the comms triggers through unconditionally.
+  - condition: or
+    conditions:
+      - condition: trigger
+        id:
+          - comms_lost
+          - monitor_lost
+      # Coming back from unavailable must not look like a threshold crossing.
+      # Checking the *current* state is not enough: numeric_state re-arms
+      # while the entity is non-numeric, and by the time `for:` has elapsed
+      # SOC is numeric again, so every alert already passed would re-fire
+      # after any >30 s gap. trigger.from_state is the state just before the
+      # crossing, which is what tells a real crossing from a recovery.
+      #
+      # Trade-off: a threshold genuinely crossed *during* an outage is not
+      # reported. An outage that long already raises comms_lost/monitor_lost.
+      - condition: template
+        value_template: >-
+          {% set bad = ['unknown', 'unavailable', 'none', ''] %}
+          {{ trigger.from_state is not none
+             and trigger.from_state.state not in bad
+             and states('sensor.jk_bms_state_of_charge') not in bad }}
+
+actions:
+  - variables:
+      soc: "{{ states('sensor.jk_bms_state_of_charge') }}"
+      volts: "{{ states('sensor.jk_bms_pack_voltage') }}"
+      amps: "{{ states('sensor.jk_bms_current') }}"
+      remain: "{{ states('sensor.jk_bms_remaining') }}"
+      # Negative current is discharge on this BMS. A pack at rest reads 0 A
+      # (or a few mA of sensor noise), which is neither.
+      flow: >-
+        {% set a = amps | float(0) %}
+        {{ 'discharging' if a < -0.05 else 'charging' if a > 0.05
+           else 'idle' }}
+
+  - choose:
+      # ---------------- BMS comms lost ----------------
+      # time-sensitive, not critical: 20% SOC keeps sole use of the critical
+      # channel. But this must break through a Focus, because it means the
+      # battery alerts can no longer reach you.
+      #
+      # Note the message does not quote SOC or voltage: those entities are
+      # unavailable by definition when this fires.
+      - conditions:
+          - condition: trigger
+            id: comms_lost
+        sequence:
+          - action: notify.mobile_app_YOUR_PHONE
+            data:
+              title: "[RS485] BMS not responding"
+              message: >-
+                Monitor is online but no data from the battery for
+                {{ relative_time(states.binary_sensor.jk_bms_bms_comms.last_changed) }}.
+                Check the RS485 lead, DIP switches at 0000, and the RS485-P
+                port. Battery alerts are blind until this clears.
+              data:
+                push:
+                  interruption-level: time-sensitive
+                group: jkbms-health
+                url: /jk-bms/diagnostics
+
+      # ---------------- monitor itself offline ----------------
+      - conditions:
+          - condition: trigger
+            id: monitor_lost
+        sequence:
+          - action: notify.mobile_app_YOUR_PHONE
+            data:
+              title: "[OFFLINE] Battery monitor offline"
+              message: >-
+                The ESP32 has stopped reporting entirely - lost power, Wi-Fi,
+                or the MQTT broker. No battery alerts of any kind will arrive
+                until it is back.
+              data:
+                push:
+                  interruption-level: time-sensitive
+                group: jkbms-health
+                url: /jk-bms/diagnostics
+
+      # ---------------- 20% — critical ----------------
+      - conditions:
+          - condition: trigger
+            id: soc_20
+        sequence:
+          - action: notify.mobile_app_YOUR_PHONE
+            data:
+              title: "[CRITICAL] Battery at {{ soc }}%"
+              message: >-
+                {{ volts }} V, {{ amps }} A ({{ flow }}), {{ remain }} Ah left.
+                Reduce load or start charging now.
+              data:
+                push:
+                  sound:
+                    name: default
+                    critical: 1
+                    volume: 1.0
+                  interruption-level: critical
+                # Groups the three alerts into one thread in Notification
+                # Centre instead of three unrelated banners.
+                group: jkbms-soc
+                # Confirmed path — dashboard slug is jk-bms.
+                url: /jk-bms/battery
+
+      # ---------------- 40% — time-sensitive ----------------
+      - conditions:
+          - condition: trigger
+            id: soc_40
+        sequence:
+          - action: notify.mobile_app_YOUR_PHONE
+            data:
+              title: "[WARNING] Battery at {{ soc }}%"
+              message: >-
+                {{ volts }} V, {{ amps }} A ({{ flow }}), {{ remain }} Ah left.
+                Next alert at 20%.
+              data:
+                push:
+                  interruption-level: time-sensitive
+                group: jkbms-soc
+                # Confirmed path — dashboard slug is jk-bms.
+                url: /jk-bms/battery
+
+      # ---------------- 60% — informational ----------------
+      - conditions:
+          - condition: trigger
+            id: soc_60
+        sequence:
+          - action: notify.mobile_app_YOUR_PHONE
+            data:
+              title: "Battery at {{ soc }}%"
+              message: >-
+                {{ volts }} V, {{ amps }} A ({{ flow }}), {{ remain }} Ah left.
+              data:
+                push:
+                  interruption-level: active
+                group: jkbms-soc
+                # Confirmed path — dashboard slug is jk-bms.
+                url: /jk-bms/battery
+
+      # ---------------- 80% — recovered ----------------
+      # Deliberately passive: it lands in Notification Centre without lighting
+      # the screen or making a sound. This is the one alert here that is not a
+      # call to do anything.
+      - conditions:
+          - condition: trigger
+            id: soc_80
+        sequence:
+          - action: notify.mobile_app_YOUR_PHONE
+            data:
+              title: "[OK] Battery recovered - {{ soc }}%"
+              message: >-
+                Back above 80%. {{ volts }} V, {{ amps }} A ({{ flow }}),
+                {{ remain }} Ah.
+              data:
+                push:
+                  interruption-level: passive
+                group: jkbms-soc
+                url: /jk-bms/battery

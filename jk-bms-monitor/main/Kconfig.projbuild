@@ -1,0 +1,66 @@
+menu "JK BMS Monitor Configuration"
+
+    config JK_WIFI_SSID
+        string "WiFi SSID"
+        default "SET_ME"
+        help
+            Network the board should join.
+
+    config JK_WIFI_PASS
+        string "WiFi password"
+        default "SET_ME"
+
+    config JK_MQTT_URI
+        string "MQTT broker URI"
+        default "mqtt://SET_ME:1883"
+        help
+            Broker address, e.g. mqtt://192.168.1.50:1883. This is the Home
+            Assistant broker, not HA's web UI port.
+
+    config JK_MQTT_USER
+        string "MQTT username"
+        default ""
+        help
+            Leave empty for an anonymous broker; the client then connects with
+            no credentials rather than with an empty username.
+
+    config JK_MQTT_PASS
+        string "MQTT password"
+        default ""
+        help
+            Deliberately empty. Anything set here is compiled into the binary
+            and written to sdkconfig, which is a file you will eventually
+            share or commit.
+
+    config JK_CELL_COUNT
+        int "Number of cells in the pack"
+        range 1 32
+        default 16
+        help
+            Used only to decide how many per-cell Home Assistant entities to
+            announce. Discovery is published when MQTT connects, which is
+            before the first frame arrives, so the count cannot be read from
+            the BMS in time. The published cell values themselves come from
+            the frame's own presence bitmap, not from this.
+
+    config JK_BAUD
+        int "RS485 baud rate"
+        default 115200
+        help
+            115200 for the 55AA push stream on RS485-P.
+
+    config JK_EXPIRE_S
+        int "Home Assistant expire_after (seconds, 0 = disabled)"
+        default 30
+        help
+            Marks entities unavailable if no state message arrives within this
+            many seconds. This is the only thing that catches a wedged
+            publisher: the availability topics cover a clean disconnect and an
+            LWT, but a task that hangs mid-loop leaves the last retained values
+            looking live forever.
+
+            Must comfortably exceed the real data cadence or entities will
+            flap. Measured on this unit: one DYNAMIC frame per ~6.4 s scan
+            cycle. 30 s covers four missed cycles.
+
+endmenu
